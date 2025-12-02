@@ -3,8 +3,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense, LayerNormalization, MultiHeadAttention, Dropout, GlobalAveragePooling1D
+from tensorflow.keras.optimizers import Adam
 
 # Step 1: Fetch Stock Data
 symbol = 'AAPL'
@@ -51,23 +52,33 @@ for i in range(sequence_length, len(scaled_data) - forecast_steps):
 
 X, y = np.array(X), np.array(y)
 
-# Reshape X for LSTM
-X = np.reshape(X, (X.shape[0], X.shape[1], X.shape[2]))
-
 # Split into train and test sets
 split = int(len(X) * 0.8)
 X_train, X_test = X[:split], X[split:]
 y_train, y_test = y[:split], y[split:]
 
-# Step 3: Build LSTM Model
-model = Sequential([
-    LSTM(100, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
-    LSTM(100),
-    Dense(forecast_steps)
-])
-model.compile(optimizer='adam', loss='mean_squared_error')
+# Step 3: Build Transformer Model
+input_layer = Input(shape=(sequence_length, X.shape[2]))
 
-print("Training model...")
+# Multi-Head Attention block
+attention_output = MultiHeadAttention(num_heads=4, key_dim=16)(input_layer, input_layer)
+attention_output = Dropout(0.1)(attention_output)
+attention_output = LayerNormalization(epsilon=1e-6)(attention_output)
+
+# Feed-forward block
+ffn_output = Dense(64, activation='relu')(attention_output)
+ffn_output = Dense(X.shape[2])(ffn_output)
+ffn_output = Dropout(0.1)(ffn_output)
+ffn_output = LayerNormalization(epsilon=1e-6)(ffn_output)
+
+# Global pooling and output
+pooled_output = GlobalAveragePooling1D()(ffn_output)
+output_layer = Dense(forecast_steps)(pooled_output)
+
+model = Model(inputs=input_layer, outputs=output_layer)
+model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+
+print("Training Transformer model...")
 model.fit(X_train, y_train, epochs=10, batch_size=32, verbose=1)
 
 # Step 4: Make Predictions
@@ -88,7 +99,7 @@ for i in range(len(predictions)):
 plt.figure(figsize=(12, 6))
 plt.plot(actual_rescaled[0], color='blue', label='Actual Price')
 plt.plot(predictions_rescaled[0], color='red', label='Predicted Price')
-plt.title(f'{symbol} Stock Price Prediction (Next {forecast_steps} Days)')
+plt.title(f'{symbol} Stock Price Prediction with Transformer (Next {forecast_steps} Days)')
 plt.xlabel('Days Ahead')
 plt.ylabel('Price')
 plt.legend()
